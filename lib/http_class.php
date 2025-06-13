@@ -136,6 +136,7 @@ class http_class
 	public $data_timeout = 30; // time waiting for data, milliseconds
 	public $data_chunk_timeout = 1; // time waiting between data chunks, millisecond
 	public $force_multipart_form_post;
+	public $user = null;
 	public $username;
 	public $password;
 	public $request_headers = array();
