@@ -43,6 +43,10 @@ class CupsPrintIPP extends ExtendedPrintIPP
 {
 	public $printers_attributes;
 	public $defaults_attributes;
+	public $values = null;
+	public $_parsing = null;
+	public $tags_types = null;
+	public $printer_tags = null;
 
 	protected $parsed;
 	protected $output;
