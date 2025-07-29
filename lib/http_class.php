@@ -103,9 +103,7 @@ function error2string($value)
 		E_USER_WARNING => 'E_USER_WARNING',
 		E_USER_NOTICE => 'E_USER_NOTICE'
 	);
-	if (defined('E_STRICT')) {
-		$level_names[E_STRICT] = 'E_STRICT';
-	}
+
 	$levels = array();
 	if (($value & E_ALL) == E_ALL)
 	{
@@ -217,7 +215,9 @@ class http_class
 			#$url = split ("/", preg_replace ("#^/{1,}#", '', $url), 2);
 			$url = preg_split("#/#", preg_replace("#^/{1,}#", '', $url), 2);
 			$url = $url[0];
+
 			$port = $this->port;
+
 			$error = sprintf(_("Cannot resolve url: %s"), $url);
 			$ip = gethostbyname($url);
 			$ip = @gethostbyaddr($ip);
@@ -233,7 +233,29 @@ class http_class
 				}
 			}
 		}
-		$this->connection = @fsockopen($transport_type . $url, $port, $errno, $errstr, $this->timeout);
+
+
+		if($transport_type === "tls://"){
+            $context = stream_context_create([
+                'ssl' => [
+                    'verify_peer' => false,
+                    'verify_peer_name' => false
+                ]
+            ]);
+
+
+            #debugEcho("stream_socket_client(".$transport_type . $url.":".$port.", , , $this->timeout, STREAM_CLIENT_CONNECT);");
+            $this->connection = stream_socket_client($transport_type . $url.":".$port, $errno, $errstr, $this->timeout, STREAM_CLIENT_CONNECT, $context);
+
+        }
+		else{
+            #debugEcho("fsockopen(".$transport_type . $url.", $port, , , $this->timeout);");
+            $this->connection = @fsockopen($transport_type . $url, $port, $errno, $errstr, $this->timeout);
+
+
+        }
+
+        #debugEcho($this->connection);
 		$error =
 			sprintf(_('Unable to connect to "%s%s port %s": %s'), $transport_type,
 				$url, $port, $errstr);
@@ -306,7 +328,7 @@ class http_class
 
 	public function ReadReplyBody(&$body, $chunk_size)
 	{
-		$body = substr($this->reply_body, $this->last_limit, $chunk_size);
+		$body = substr($this->reply_body, (int)$this->last_limit, $chunk_size);
 		$this->last_limit += $chunk_size;
 	}
 
@@ -327,21 +349,14 @@ class http_class
 
 	private function _HttpError($msg, $level, $errno = null)
 	{
-		if ($this->debug)
+		$trace = '';
+		$backtrace = debug_backtrace();
+		foreach ($backtrace as $trace)
 		{
-			$trace = '';
-			$backtrace = debug_backtrace();
-			foreach ($backtrace as $backtrace_item)
-			{
-				$backtrace_item['file'] = (!isset($backtrace_item['file'])) ? '' : $backtrace_item['file'];
-				$backtrace_item['function'] = (!isset($backtrace_item['function'])) ? '' : $backtrace_item['function'];
-				$backtrace_item['line'] = (!isset($backtrace_item['line'])) ? '' : $backtrace_item['line'];
-
-				$trace .= sprintf("in [file: '%s'][function: '%s'][line: %s];\n", $backtrace_item['file'], $backtrace_item['function'], $backtrace_item['line']);
-			}
-			$msg = sprintf("%s\n%s: [errno: %s]: %s", $trace, error2string($level), $errno, $msg);
+			$trace .= sprintf("in [file: '%s'][function: '%s'][line: %s];\n", $trace['file'], $trace['function'], $trace['line']);
 		}
-
+		$msg = sprintf('%s\n%s: [errno: %s]: %s',
+			$trace, error2string($level), $errno, $msg);
 		if ($this->with_exceptions)
 		{
 			throw new httpException ($msg, $errno);
@@ -353,18 +368,46 @@ class http_class
 		}
 	}
 
-	private function _streamString($string)
+	private function _streamString($string,$retry = 0)
 	{
+
+	    //Vorschlag Bugfix aus Github
+        if (strlen($string) === 0)
+        {
+            return true;
+        }
+
+
 		$success = fwrite($this->connection, $string);
 		if (!$success)
 		{
+		    debug("http_class.php _streamString failed. Retry: $retry");
+		    debug(error_get_last());
+		    debug($this->connection,'$this->connection');
+		    debug(strlen($string),'bytes to write');
+		    debug($success,'$success');
+
+		    //Retry
+            $retry++;
+
+            if($retry < 2){
+                usleep(250*1000);
+                return $this->_streamString($string,$retry);
+            }
+
 			return false;
 		}
+
+		if($retry > 0){
+		    debug("http_class.php _streamString success in $retry. Wiederholung");
+        }
+
 		return true;
 	}
 
 	private function _StreamRequest($arguments)
 	{
+	    #debugEcho($arguments);
 		$this->status = false;
 		$this->reply_headers = array();
 		$this->reply_body = "";
@@ -376,9 +419,18 @@ class http_class
 		$content_length = 0;
 		foreach ($this->arguments["BodyStream"] as $argument)
 		{
-			list ($type, $value) = each($argument);
-			reset($argument);
-			if ($type == "Data")
+
+            #debugEcho($argument);
+			$type = null;
+			$value = null;
+            foreach ($argument as $key => $item) {
+                $type = $key;
+                $value = $item;
+            }
+			//reset($argument);
+
+            #debugEcho($type);
+            if ($type == "Data")
 			{
 				$length = strlen($value);
 			}
@@ -443,8 +495,17 @@ class http_class
 		}
 		foreach ($this->arguments["BodyStream"] as $argument)
 		{
-			list ($type, $value) = each($argument);
-			reset($argument);
+			#list ($type, $value) = each($argument);
+            #reset($argument);
+            $type = null;
+            $value = null;
+            foreach ($argument as $key => $item) {
+                $type = $key;
+                $value = $item;
+            }
+
+
+
 			if ($type == "Data")
 			{
 				$streamed_length = 0;
@@ -557,7 +618,7 @@ class http_class
 		$nc = sprintf('%x', $this->nc);
 		$prepend = "";
 		while ((strlen($nc) + strlen($prepend)) < 8)
-			$prependi .= "0";
+			$prepend .= "0";
 		$nc = $prepend . $nc;
 		$cnonce = "printipp";
 		$username = $this->user;
@@ -638,11 +699,3 @@ class http_class
 		return $auth_scheme;
 	}
 }
-
-/*
- * Local variables:
- * mode: php
- * tab-width: 2
- * c-basic-offset: 2
- * End:
- */
