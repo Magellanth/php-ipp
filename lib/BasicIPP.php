@@ -95,6 +95,12 @@ class BasicIPP
 	public $response;
 	public $meta;
 
+    public $values;
+    public $_parsing;
+    public $tags_types;
+    public $printer_tags;
+    public $attribute_name;
+
 	// protected variables;
 	protected $log_level = 2; // max 3: very verbose
 	protected $log_type = 3; // 3: file | 1: e-mail | 0: logger
